@@ -1,6 +1,6 @@
-#TFM ÁNGELA MUZZATI 
+# TFM ÁNGELA MUZZATI 
 
-# FASE 0
+# --- FASE 0: CONFIGURACIÓN E IMPORTACIONES ---
 import pandas as pd
 import sqlite3
 import holidays
@@ -13,25 +13,37 @@ from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error, r2_score
-import squarify # Librería para el gráfico de rectángulos
+import squarify
+import requests
 
-# Fijo la aleatoriedad para que los resultados sean siempre los mismos
+# Fija la aleatoriedad para que los resultados sean siempre los mismos
 random.seed(42)
 np.random.seed(42)
 
-RUTA_PROYECTO = "C:\\Users\\amuzzati\\Documents\\MASTER"
-CARPETA_RAW = os.path.join(RUTA_PROYECTO, "01_data_raw")
-CARPETA_PROCESADOS = os.path.join(RUTA_PROYECTO, "02_data_processed")
-CARPETA_GRAFICOS = os.path.join(RUTA_PROYECTO, "05_graficos")
-
-os.makedirs(CARPETA_PROCESADOS, exist_ok=True)
-os.makedirs(CARPETA_GRAFICOS, exist_ok=True)
 print("✅ Fase 0: Configuración completada.")
 
-# FASE 1
-print("\n--- Fase 1: Procesando y enriqueciendo datos...")
+# --- FASE 1: PROCESAMIENTO Y ENRIQUECIMIENTO DE DATOS (DESDE GITHUB) ---
+print("\n--- Fase 1: Descargando y procesando datos desde GitHub...")
+
+# Nombres de tu repositorio de GitHub
+usuario_github = "AMUZZATI"
+repo_nombre = "TFM_Angela_Muzzati"
+
+# Conectamos a la API de GitHub para obtener la lista de archivos
+url_api = f"https://api.github.com/repos/{usuario_github}/{repo_nombre}/contents/01_data_raw"
+try:
+    response = requests.get(url_api)
+    response.raise_for_status()
+    files = response.json()
+except requests.exceptions.RequestException as e:
+    print(f"*** ERROR: No se pudo conectar a GitHub. Revisa el nombre de usuario y repositorio. Error: {e} ***")
+    raise
+
+archivos_csv_info = [f for f in files if isinstance(f, dict) and f.get('name', '').endswith('.csv')]
+if not archivos_csv_info:
+    raise FileNotFoundError("No se encontraron archivos CSV en la carpeta '01_data_raw' del repositorio.")
+
 autonomias = { "Morella": "VC", "Balmaseda": "PV", "Puebla de Sanabria": "CL", "Sopuerta": "PV", "Culla": "VC", "La Seu d'Urgell": "CT", "Lorca": "MC", "Pobladura del Valle": "CL", "Bermeo": "PV", "Frías": "CL", "Baena": "AN", "Onda": "VC", "Gautegiz Arteaga": "PV" }
-archivos_a_procesar = [f for f in os.listdir(CARPETA_RAW) if f.endswith('.csv')]
 def generar_clima_sintetico(fecha):
     mes = fecha.month
     if mes in [6, 7, 8]: temp, precip = random.uniform(22, 35), random.choice([0,0,0,0.5])
@@ -40,10 +52,13 @@ def generar_clima_sintetico(fecha):
     else: temp, precip = random.uniform(4, 15), random.choice([0,2,4,7])
     return {'temperatura': round(temp, 2), 'precipitacion': precip}
 def es_festivo(fecha, ccaa_cod): return fecha in holidays.Spain(prov=ccaa_cod)
+
 lista_df_mejorados = []
-for nombre_archivo in archivos_a_procesar:
-    ruta_lectura = os.path.join(CARPETA_RAW, nombre_archivo)
-    df = pd.read_csv(ruta_lectura)
+for file_info in archivos_csv_info:
+    url_archivo_raw = file_info['download_url']
+    nombre_archivo = file_info['name']
+    print(f"  -> Procesando: {nombre_archivo}...")
+    df = pd.read_csv(url_archivo_raw)
     if 'Fecha de entrada' not in df.columns: continue
     df.columns = [col.strip() for col in df.columns]
     df['Fecha de entrada'] = pd.to_datetime(df['Fecha de entrada'])
@@ -66,39 +81,37 @@ def obtener_temporada(mes):
     if mes in [3, 4, 5]: return 'Primavera'
     return 'Otono'
 df_maestro['temporada'] = pd.to_datetime(df_maestro['Fecha de entrada']).dt.month.apply(obtener_temporada)
-ruta_maestra_csv = os.path.join(CARPETA_PROCESADOS, "Base_de_Datos_Maestra.csv")
-df_maestro.to_csv(ruta_maestra_csv, index=False)
 
 # Creación de la base de datos (Arquitectura)
-ruta_db = os.path.join(CARPETA_PROCESADOS, "TFM_Reservas.db")
+# Nota: La base de datos se creará en el entorno de ejecución (no se sube a GitHub)
+ruta_db = "TFM_Reservas.db"
 conn = sqlite3.connect(ruta_db)
-df_crudo_total = pd.concat([pd.read_csv(os.path.join(CARPETA_RAW, f)) for f in archivos_a_procesar], ignore_index=True)
+df_crudo_total = pd.concat([pd.read_csv(f['download_url']) for f in archivos_csv_info if 'servicios' not in f['name']], ignore_index=True)
 df_crudo_total.to_sql('reservas_raw', conn, if_exists='replace', index=False)
 df_maestro.to_sql('reservas_clean', conn, if_exists='replace', index=False)
 conn.close()
-print("✅ Fase 2: ¡Nuevas variables creadas y base de datos generada!")
+print(f"✅ Fase 2: ¡Nuevas variables creadas y base de datos '{ruta_db}' generada!")
 
 # --- FASE 3: ANÁLISIS EXPLORATORIO DE DATOS (EDA) ---
 print("\n--- Fase 3: Generando gráficos exploratorios...")
 sns.set_theme(style="whitegrid")
 
-# Gráfico 1: Boxplot Gasto por Temporada
+# Gráfico 1: Gasto por Temporada
 plt.figure(figsize=(10, 6))
 sns.boxplot(x='temporada', y='Gasto total (€)', data=df_maestro, order=['Primavera', 'Verano', 'Otono', 'Invierno'])
 plt.title('Distribución del Gasto Total por Temporada', fontsize=16)
 plt.show()
 
 # Gráfico 2: Heatmap de Correlaciones
-variables_numericas = df_maestro.select_dtypes(include=np.number).columns.tolist()
 plt.figure(figsize=(12, 10))
-sns.heatmap(df_maestro[variables_numericas].corr(), annot=True, cmap='coolwarm', fmt=".2f")
+sns.heatmap(df_maestro.select_dtypes(include=np.number).corr(), annot=True, cmap='coolwarm', fmt=".2f")
 plt.title('Mapa de Calor de Correlaciones Numéricas', fontsize=16)
 plt.show()
 
 # Gráfico 3: Scatter Plot de Relaciones
 plt.figure(figsize=(14, 8))
-sns.scatterplot(data=df_maestro, x='Nº noches', y='Gasto total (€)', size='Nº personas', hue='Área de actucaravana', sizes=(50, 500), alpha=0.7)
-plt.title('Relación entre Gasto, Noches y Personas por Área', fontsize=16)
+sns.scatterplot(data=df_maestro, x='Nº noches', y='Gasto total (€)', size='Nº personas', hue='temporada', sizes=(50, 500), alpha=0.7)
+plt.title('Relación entre Gasto, Noches y Personas por Temporada', fontsize=16)
 plt.legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
 plt.tight_layout()
 plt.show()
@@ -106,9 +119,24 @@ plt.show()
 # Gráfico 4: Treemap de Contribución por Área
 df_gasto_area = df_maestro.groupby('Área de actucaravana')['Gasto total (€)'].sum().reset_index()
 plt.figure(figsize=(16, 8))
-squarify.plot(sizes=df_gasto_area['Gasto total (€)'], label=df_gasto_area['Área de actucaravana'], alpha=0.8)
+squarify.plot(sizes=df_gasto_area['Gasto total (€)'], label=df_gasto_area['Área de actucaravana'], alpha=0.8, text_kwargs={'fontsize':10})
 plt.title('Contribución al Gasto Total por Área', fontsize=16)
 plt.axis('off')
+plt.show()
+
+# Gráfico 5: Evolución temporal del gasto
+df_maestro.set_index(pd.to_datetime(df_maestro['Fecha de entrada']))['Gasto total (€)'].resample('M').sum().plot(figsize=(15, 7), marker='o')
+plt.title('Evolución Mensual del Gasto Total', fontsize=16)
+plt.ylabel('Gasto Total (€)')
+plt.xlabel('Fecha')
+plt.grid(True)
+plt.show()
+
+# Gráfico 6: Gasto promedio por festivo/no festivo
+plt.figure(figsize=(8, 6))
+sns.barplot(x='es_festivo', y='Gasto total (€)', data=df_maestro)
+plt.title('Comparativa de Gasto Promedio: Festivo vs. No Festivo', fontsize=16)
+plt.xticks([0, 1], ['No Festivo', 'Festivo'])
 plt.show()
 print("✅ Fase 3: ¡Análisis exploratorio finalizado!")
 
@@ -123,13 +151,11 @@ X = X.select_dtypes(include=np.number)
 y = df_modelado['Gasto total (€)']
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# Modelo 1: Regresión Lineal
 lr = LinearRegression().fit(X_train, y_train)
 y_pred_lr = lr.predict(X_test)
 r2_lr = r2_score(y_test, y_pred_lr)
 rmse_lr = np.sqrt(mean_squared_error(y_test, y_pred_lr))
 
-# Modelo 2: Random Forest (No lineal)
 rf = RandomForestRegressor(n_estimators=100, random_state=42).fit(X_train, y_train)
 y_pred_rf = rf.predict(X_test)
 r2_rf = r2_score(y_test, y_pred_rf)
@@ -149,8 +175,9 @@ print("\n--- Fase 5: Analizando importancia de variables con Random Forest...")
 importancias = rf.feature_importances_
 df_importancia = pd.DataFrame({'Variable': X.columns, 'Importancia': importancias}).sort_values(by='Importancia', ascending=False)
 plt.figure(figsize=(12, 8))
-sns.barplot(x='Importancia', y='Variable', data=df_importancia.head(10)) # Top 10
-plt.title('Top 10 Variables más Importantes para Predecir el Gasto', fontsize=16)
+sns.barplot(x='Importancia', y='Variable', data=df_importancia.head(15)) # Top 15
+plt.title('Top 15 Variables más Importantes para Predecir el Gasto', fontsize=16)
+plt.tight_layout()
 plt.show()
 print("✅ Fase 5: ¡Análisis de importancia completado!")
 
@@ -166,7 +193,7 @@ y_completo = df_simulador['Gasto total (€)']
 modelo_lineal_completo = LinearRegression().fit(X_completo, y_completo)
 
 print("\n\n" + "="*50)
-print("--- COPIA Y PEGA ESTOS NÚMEROS EN POWER BI ---")
+print("--- COEFICIENTES FINALES PARA POWER BI ---")
 print("="*50)
 print(f"Intercepto: {modelo_lineal_completo.intercept_:.2f}")
 for variable, coef in zip(X_completo.columns, modelo_lineal_completo.coef_):
