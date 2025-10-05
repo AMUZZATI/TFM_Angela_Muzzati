@@ -20,7 +20,7 @@ import requests
 random.seed(42)
 np.random.seed(42)
 
-print("✅ Fase 0)
+print("✅ Fase 0")
 
 # FASE 1
 print("\n Fase 1")
